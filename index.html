@@ -34,12 +34,12 @@ button.go{background:var(--ink);color:var(--bg);font-weight:bold}button.sos{back
 <script>
 const firebaseConfig={apiKey:"AIzaSyAllGwfKwd0K5mM2BxmoXn5P9_4ItRvoiM",authDomain:"realtime-database-61cd2.firebaseapp.com",databaseURL:"https://realtime-database-61cd2-default-rtdb.firebaseio.com",projectId:"realtime-database-61cd2",storageBucket:"realtime-database-61cd2.firebasestorage.app",messagingSenderId:"906581522503",appId:"1:906581522503:web:49f52600f58f712e8b9962"};
 firebase.initializeApp(firebaseConfig);const auth=firebase.auth(),ref=firebase.database().ref("live");
-const L={idle:"Not riding",riding:"🟢 Riding",signal:"🚦 At signal",stopped:"🔴 Stopped",approaching:"📍 Approaching",emergency:"🚨 EMERGENCY",lost:"⚠️ No signal 10+ min"};
+const LB={idle:"Not riding",riding:"🟢 Riding",signal:"🚦 At signal",stopped:"🔴 Stopped",approaching:"📍 Approaching",emergency:"🚨 EMERGENCY",lost:"⚠️ No signal 10+ min"};
 const $=id=>document.getElementById(id);let live=null,pts=[],lastSlow=null,emerg=false,brk=false,dest=null,lastW=0,last,mk,line,map;
 map=L.map("map").setView([13.08,80.27],12);L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
 function dist(a,b,c,d){const R=6371000,r=x=>x*Math.PI/180,h=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
 function show(d){if(!d)return;live=d;pts=d.trail||[];const age=Date.now()-d.t;let s=d.status;if(s!=="emergency"&&age>600000)s="lost";
-$("badge").className="badge "+s;$("badge").textContent=L[s]||s;$("spd").textContent=Math.round(d.speed||0);
+$("badge").className="badge "+s;$("badge").textContent=LB[s]||s;$("spd").textContent=Math.round(d.speed||0);
 $("dst").textContent=d.toDest==null?"–":(d.toDest>=1000?(d.toDest/1000).toFixed(1)+" km":Math.round(d.toDest)+" m");
 const ll=[d.lat,d.lng];if(!mk){mk=L.circleMarker(ll,{radius:9,color:"#1b1b1b",fillColor:"#b3261e",fillOpacity:1}).addTo(map);line=L.polyline(pts,{color:"#c9962b",weight:4}).addTo(map)}else{mk.setLatLng(ll);line.setLatLngs(pts)}
 map.setView(ll,Math.max(map.getZoom(),15));$("gm").href="https://www.google.com/maps?q="+d.lat+","+d.lng;$("gm").classList.remove("hide");tick()}
