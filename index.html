@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Maya Live</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#f3e9d2;--card:#fffaf0;--ink:#1b1b1b;--red:#b3261e;--gold:#c9962b;--mut:#6b6254;--line:#1b1b1b}
+@media (prefers-color-scheme:dark){:root{--bg:#1a1714;--card:#262119;--ink:#f3e9d2;--mut:#b5a98f;--line:#f3e9d2}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Georgia,serif;max-width:520px;margin:auto;padding:14px;padding-top:max(14px,env(safe-area-inset-top))}
+h1{margin:0;font-size:22px;letter-spacing:2px;text-transform:uppercase}.sub{color:var(--mut);font-size:13px;margin-bottom:8px}
+.card{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:14px;margin:12px 0;box-shadow:4px 4px 0 var(--gold)}
+.badge{font-size:26px;font-weight:bold;text-align:center;padding:16px;border-radius:12px;border:2px solid var(--line);background:#3a7d44;color:#fff}
+.badge.signal{background:var(--gold);color:#1b1b1b}.badge.stopped{background:#555}.badge.approaching{background:#1d5fa8}.badge.emergency,.badge.lost{background:var(--red);animation:p 1s infinite}.badge.idle{background:var(--mut)}
+@keyframes p{50%{opacity:.6}}@media (prefers-reduced-motion:reduce){.badge{animation:none!important}}
+.row{display:flex;gap:10px;margin-top:10px;text-align:center}.row div{flex:1}.big{font-size:22px;font-weight:bold}.lbl{font-size:12px;color:var(--mut);text-transform:uppercase}
+#map{height:260px;border-radius:10px;border:2px solid var(--line);margin-top:8px}
+button,input{font:inherit;padding:12px;border-radius:10px;border:2px solid var(--line);background:var(--card);color:var(--ink);width:100%;margin-top:8px}
+button.go{background:var(--ink);color:var(--bg);font-weight:bold}button.sos{background:var(--red);color:#fff;font-weight:bold;font-size:18px}.hide{display:none}small{color:var(--mut)}a{color:var(--red);font-weight:bold}
+</style></head><body>
+<h1>Maya Live</h1><div class="sub">Yamaha XSR 155 · live ride status</div>
+<div class="card"><div id="badge" class="badge idle">Waiting for ride…</div>
+<div class="row"><div><div class="big" id="spd">–</div><div class="lbl">km/h</div></div><div><div class="big" id="dst">–</div><div class="lbl">to dest.</div></div><div><div class="big" id="age">–</div><div class="lbl">updated</div></div></div>
+<div id="map"></div><a id="gm" class="hide" target="_blank" rel="noopener">Open in Google Maps</a></div>
+
+<div class="card"><button id="loginBtn">Rider login</button>
+<div id="login" class="hide"><input id="em" type="email" placeholder="Rider email"><input id="pw" type="password" placeholder="Password"><button class="go" id="in">Sign in</button></div>
+<div id="rider" class="hide"><input id="dest" placeholder="Destination lat,lng (optional)"><button class="go" id="start">Start ride</button>
+<button class="sos" id="sos">Hold 2s for SOS 🚨</button><button id="ok" class="hide">I'm OK – cancel emergency</button>
+<button id="brk">Taking a break (pause 10-min alert)</button><button id="out">Sign out</button></div><small id="msg"></small></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+const firebaseConfig={apiKey:"AIzaSyAllGwfKwd0K5mM2BxmoXn5P9_4ItRvoiM",authDomain:"realtime-database-61cd2.firebaseapp.com",databaseURL:"https://realtime-database-61cd2-default-rtdb.firebaseio.com",projectId:"realtime-database-61cd2",storageBucket:"realtime-database-61cd2.firebasestorage.app",messagingSenderId:"906581522503",appId:"1:906581522503:web:49f52600f58f712e8b9962"};
+firebase.initializeApp(firebaseConfig);const auth=firebase.auth(),ref=firebase.database().ref("live");
+const L={idle:"Not riding",riding:"🟢 Riding",signal:"🚦 At signal",stopped:"🔴 Stopped",approaching:"📍 Approaching",emergency:"🚨 EMERGENCY",lost:"⚠️ No signal 10+ min"};
+const $=id=>document.getElementById(id);let live=null,pts=[],lastSlow=null,emerg=false,brk=false,dest=null,lastW=0,last,mk,line,map;
+map=L.map("map").setView([13.08,80.27],12);L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
+function dist(a,b,c,d){const R=6371000,r=x=>x*Math.PI/180,h=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
+function show(d){if(!d)return;live=d;pts=d.trail||[];const age=Date.now()-d.t;let s=d.status;if(s!=="emergency"&&age>600000)s="lost";
+$("badge").className="badge "+s;$("badge").textContent=L[s]||s;$("spd").textContent=Math.round(d.speed||0);
+$("dst").textContent=d.toDest==null?"–":(d.toDest>=1000?(d.toDest/1000).toFixed(1)+" km":Math.round(d.toDest)+" m");
+const ll=[d.lat,d.lng];if(!mk){mk=L.circleMarker(ll,{radius:9,color:"#1b1b1b",fillColor:"#b3261e",fillOpacity:1}).addTo(map);line=L.polyline(pts,{color:"#c9962b",weight:4}).addTo(map)}else{mk.setLatLng(ll);line.setLatLngs(pts)}
+map.setView(ll,Math.max(map.getZoom(),15));$("gm").href="https://www.google.com/maps?q="+d.lat+","+d.lng;$("gm").classList.remove("hide");tick()}
+function tick(){if(!live)return;const s=Math.round((Date.now()-live.t)/1000);$("age").textContent=s<60?s+"s":Math.round(s/60)+"m";if(s>600&&live.status!=="emergency")show(live)}setInterval(tick,1000);
+ref.on("value",s=>show(s.val()));
+function status(sp,toD){if(emerg)return"emergency";if(toD!=null&&toD<1000)return"approaching";if(sp<2){lastSlow=lastSlow||Date.now();const t=Date.now()-lastSlow;if(!brk&&t>600000)return"emergency";return t>180000?"stopped":(t>4000?"signal":"riding")}lastSlow=null;return"riding"}
+async function push(p,force){const n=Date.now();if(!force&&n-lastW<4000)return;lastW=n;const sp=(p.speed||0)*3.6,toD=dest?dist(p.lat,p.lng,dest[0],dest[1]):null;
+if(!pts.length||dist(pts[pts.length-1][0],pts[pts.length-1][1],p.lat,p.lng)>8)pts.push([p.lat,p.lng]);if(pts.length>150)pts.shift();
+const d={lat:p.lat,lng:p.lng,speed:sp,toDest:toD,status:status(sp,toD),t:n,trail:pts};if(d.status==="emergency")$("ok").classList.remove("hide");
+try{await ref.set(d)}catch(e){$("msg").textContent="Send failed: "+e.message}}
+$("loginBtn").onclick=()=>$("login").classList.toggle("hide");
+$("in").onclick=()=>auth.signInWithEmailAndPassword($("em").value,$("pw").value).catch(e=>$("msg").textContent=e.message);
+$("out").onclick=()=>auth.signOut();
+auth.onAuthStateChanged(u=>{$("rider").classList.toggle("hide",!u);$("login").classList.add("hide");$("loginBtn").classList.toggle("hide",!!u)});
+$("start").onclick=async()=>{const v=$("dest").value.split(",").map(Number);dest=v.length==2&&v.every(x=>!isNaN(x))?v:null;
+try{await navigator.wakeLock.request("screen")}catch(e){}
+$("start").textContent="Ride in progress";$("start").disabled=true;
+navigator.geolocation.watchPosition(x=>{last={lat:x.coords.latitude,lng:x.coords.longitude,speed:x.coords.speed};push(last)},e=>$("msg").textContent="Location: "+e.message,{enableHighAccuracy:true,maximumAge:2000});
+setInterval(()=>{if(last)push(last,true)},5000)};
+let hold;const sos=$("sos");["mousedown","touchstart"].forEach(e=>sos.addEventListener(e,()=>{hold=setTimeout(()=>{emerg=true;$("ok").classList.remove("hide");if(last)push(last,true)},2000)}));
+["mouseup","mouseleave","touchend","touchcancel"].forEach(e=>sos.addEventListener(e,()=>clearTimeout(hold)));
+$("brk").onclick=()=>{brk=!brk;lastSlow=Date.now();$("brk").textContent=brk?"Break ON – tap to resume alert":"Taking a break (pause 10-min alert)"};
+$("ok").onclick=()=>{emerg=false;lastSlow=Date.now();$("ok").classList.add("hide");if(last)push(last,true)};
+</script></body></html>
