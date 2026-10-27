@@ -21,11 +21,11 @@ button.go{background:var(--ink);color:var(--bg);font-weight:bold}button.sos{back
 <div class="row"><div><div class="big" id="spd">–</div><div class="lbl">km/h</div></div><div><div class="big" id="dst">–</div><div class="lbl">to dest.</div></div><div><div class="big" id="age">–</div><div class="lbl">updated</div></div></div>
 <div id="map"></div><a id="gm" class="hide" target="_blank" rel="noopener">Open in Google Maps</a></div>
 
-<div class="card"><button id="loginBtn">Rider login</button>
+<div class="card hide" id="ctl"><button id="loginBtn">Rider login</button>
 <div id="login" class="hide"><input id="em" type="email" placeholder="Rider email"><input id="pw" type="password" placeholder="Password"><button class="go" id="in">Sign in</button></div>
 <div id="rider" class="hide"><input id="dest" placeholder="Destination lat,lng (optional)"><button class="go" id="start">Start ride</button>
 <button class="sos" id="sos">Hold 2s for SOS 🚨</button><button id="ok" class="hide">I'm OK – cancel emergency</button>
-<button id="brk">Taking a break (pause 10-min alert)</button><button id="out">Sign out</button></div><small id="msg"></small></div>
+<button id="brk">Taking a break (pause 10-min alert)</button><button class="go" id="share">Share live link</button><button id="end">End ride</button><button id="out">Sign out</button></div><small id="msg"></small></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -44,12 +44,16 @@ $("dst").textContent=d.toDest==null?"–":(d.toDest>=1000?(d.toDest/1000).toFixe
 const ll=[d.lat,d.lng];if(!mk){mk=L.circleMarker(ll,{radius:9,color:"#1b1b1b",fillColor:"#b3261e",fillOpacity:1}).addTo(map);line=L.polyline(pts,{color:"#c9962b",weight:4}).addTo(map)}else{mk.setLatLng(ll);line.setLatLngs(pts)}
 map.setView(ll,Math.max(map.getZoom(),15));$("gm").href="https://www.google.com/maps?q="+d.lat+","+d.lng;$("gm").classList.remove("hide");tick()}
 function tick(){if(!live)return;const s=Math.round((Date.now()-live.t)/1000);$("age").textContent=s<60?s+"s":Math.round(s/60)+"m";if(s>600&&live.status!=="emergency")show(live)}setInterval(tick,1000);
-ref.on("value",s=>show(s.val()));
+function idle(){live=null;pts=[];if(mk){map.removeLayer(mk);map.removeLayer(line);mk=null}$("badge").className="badge idle";$("badge").textContent="Not riding";$("spd").textContent="–";$("dst").textContent="–";$("age").textContent="–";$("gm").classList.add("hide")}
+ref.on("value",s=>s.val()?show(s.val()):idle());
 function status(sp,toD){if(emerg)return"emergency";if(toD!=null&&toD<1000)return"approaching";if(sp<2){lastSlow=lastSlow||Date.now();const t=Date.now()-lastSlow;if(!brk&&t>600000)return"emergency";return t>180000?"stopped":(t>4000?"signal":"riding")}lastSlow=null;return"riding"}
 async function push(p,force){const n=Date.now();if(!force&&n-lastW<4000)return;lastW=n;const sp=(p.speed||0)*3.6,toD=dest?dist(p.lat,p.lng,dest[0],dest[1]):null;
 if(!pts.length||dist(pts[pts.length-1][0],pts[pts.length-1][1],p.lat,p.lng)>8)pts.push([p.lat,p.lng]);if(pts.length>150)pts.shift();
 const d={lat:p.lat,lng:p.lng,speed:sp,toDest:toD,status:status(sp,toD),t:n,trail:pts};if(d.status==="emergency")$("ok").classList.remove("hide");
 try{await ref.set(d)}catch(e){$("msg").textContent="Send failed: "+e.message}}
+let wid,hb;if(location.search.includes("rider"))$("ctl").classList.remove("hide");
+$("share").onclick=()=>{const u=location.origin+location.pathname,t="Follow my ride live:";if(navigator.share)navigator.share({title:"Maya Live",text:t,url:u}).catch(()=>{});else window.open("https://wa.me/?text="+encodeURIComponent(t+" "+u))};
+$("end").onclick=async()=>{if(wid!=null)navigator.geolocation.clearWatch(wid);clearInterval(hb);wid=null;last=null;emerg=false;$("ok").classList.add("hide");$("start").disabled=false;$("start").textContent="Start ride";try{await ref.remove()}catch(e){$("msg").textContent="Could not clear: "+e.message}};
 $("loginBtn").onclick=()=>$("login").classList.toggle("hide");
 $("in").onclick=()=>auth.signInWithEmailAndPassword($("em").value,$("pw").value).catch(e=>$("msg").textContent=e.message);
 $("out").onclick=()=>auth.signOut();
@@ -57,8 +61,8 @@ auth.onAuthStateChanged(u=>{$("rider").classList.toggle("hide",!u);$("login").cl
 $("start").onclick=async()=>{const v=$("dest").value.split(",").map(Number);dest=v.length==2&&v.every(x=>!isNaN(x))?v:null;
 try{await navigator.wakeLock.request("screen")}catch(e){}
 $("start").textContent="Ride in progress";$("start").disabled=true;
-navigator.geolocation.watchPosition(x=>{last={lat:x.coords.latitude,lng:x.coords.longitude,speed:x.coords.speed};push(last)},e=>$("msg").textContent="Location: "+e.message,{enableHighAccuracy:true,maximumAge:2000});
-setInterval(()=>{if(last)push(last,true)},5000)};
+wid=navigator.geolocation.watchPosition(x=>{last={lat:x.coords.latitude,lng:x.coords.longitude,speed:x.coords.speed};push(last)},e=>$("msg").textContent="Location: "+e.message,{enableHighAccuracy:true,maximumAge:2000});
+hb=setInterval(()=>{if(last)push(last,true)},5000)};
 let hold;const sos=$("sos");["mousedown","touchstart"].forEach(e=>sos.addEventListener(e,()=>{hold=setTimeout(()=>{emerg=true;$("ok").classList.remove("hide");if(last)push(last,true)},2000)}));
 ["mouseup","mouseleave","touchend","touchcancel"].forEach(e=>sos.addEventListener(e,()=>clearTimeout(hold)));
 $("brk").onclick=()=>{brk=!brk;lastSlow=Date.now();$("brk").textContent=brk?"Break ON – tap to resume alert":"Taking a break (pause 10-min alert)"};
