@@ -51,13 +51,15 @@ async function push(p,force){const n=Date.now();if(!force&&n-lastW<4000)return;l
 if(!pts.length||dist(pts[pts.length-1][0],pts[pts.length-1][1],p.lat,p.lng)>8)pts.push([p.lat,p.lng]);if(pts.length>150)pts.shift();
 const d={lat:p.lat,lng:p.lng,speed:sp,toDest:toD,status:status(sp,toD),t:n,trail:pts};if(d.status==="emergency")$("ok").classList.remove("hide");
 try{await ref.set(d)}catch(e){$("msg").textContent="Send failed: "+e.message}}
-let wid,hb;if(location.search.includes("rider"))$("ctl").classList.remove("hide");
+let wid,hb;let asked=false;const h1=document.querySelector("h1");h1.style.userSelect="none";h1.style.webkitUserSelect="none";let ht;
+["touchstart","mousedown"].forEach(e=>h1.addEventListener(e,()=>{ht=setTimeout(()=>{asked=true;$("ctl").classList.remove("hide");$("login").classList.remove("hide")},2000)}));
+["touchend","touchcancel","mouseup","mouseleave"].forEach(e=>h1.addEventListener(e,()=>clearTimeout(ht)));h1.addEventListener("contextmenu",e=>e.preventDefault());
 $("share").onclick=()=>{const u=location.origin+location.pathname,t="Follow my ride live:";if(navigator.share)navigator.share({title:"Maya Live",text:t,url:u}).catch(()=>{});else window.open("https://wa.me/?text="+encodeURIComponent(t+" "+u))};
 $("end").onclick=async()=>{if(wid!=null)navigator.geolocation.clearWatch(wid);clearInterval(hb);wid=null;last=null;emerg=false;$("ok").classList.add("hide");$("start").disabled=false;$("start").textContent="Start ride";try{await ref.remove()}catch(e){$("msg").textContent="Could not clear: "+e.message}};
 $("loginBtn").onclick=()=>$("login").classList.toggle("hide");
 $("in").onclick=()=>auth.signInWithEmailAndPassword($("em").value,$("pw").value).catch(e=>$("msg").textContent=e.message);
-$("out").onclick=()=>auth.signOut();
-auth.onAuthStateChanged(u=>{$("rider").classList.toggle("hide",!u);$("login").classList.add("hide");$("loginBtn").classList.toggle("hide",!!u)});
+$("out").onclick=()=>{asked=false;auth.signOut()};
+auth.onAuthStateChanged(u=>{$("ctl").classList.toggle("hide",!u&&!asked);$("rider").classList.toggle("hide",!u);$("login").classList.toggle("hide",!!u||!asked);$("loginBtn").classList.add("hide")});
 $("start").onclick=async()=>{const v=$("dest").value.split(",").map(Number);dest=v.length==2&&v.every(x=>!isNaN(x))?v:null;
 try{await navigator.wakeLock.request("screen")}catch(e){}
 $("start").textContent="Ride in progress";$("start").disabled=true;
