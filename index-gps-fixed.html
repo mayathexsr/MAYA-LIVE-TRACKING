@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Maya Live Tracking</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#080909">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--ob:#080909;--bg:#101112;--card:#171717;--bd:#303030;--gold:#C9A44C;--gold2:#E4C56A;--tx:#F5F3ED;--mut:#999;--red:#d12f2f}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:560px;background:radial-gradient(120% 55% at 50% 0,#1b1b1b 0,#080909 62%) #080909;color:var(--tx);font-family:"Helvetica Neue",Arial,sans-serif;padding:max(14px,env(safe-area-inset-top)) 14px calc(40px + env(safe-area-inset-bottom))}
+h1{margin:0;font-size:20px;letter-spacing:.34em;font-weight:600;color:var(--gold2);text-transform:uppercase;user-select:none;-webkit-user-select:none;outline-offset:4px}
+.sub{color:var(--mut);font-size:12px;letter-spacing:.12em;text-transform:uppercase;margin:4px 0 10px}
+.pills{display:flex;gap:6px;flex-wrap:wrap}.pill{padding:4px 10px;border:1px solid var(--bd);border-radius:99px;font-size:12px;color:var(--mut)}
+.pill.on{border-color:var(--gold);color:var(--gold2)}.pill.bad{border-color:var(--red);color:#ff9a9a}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:14px;margin:12px 0}
+.speed{font-size:88px;font-weight:200;line-height:1;text-align:center;font-variant-numeric:tabular-nums;margin-top:6px}
+.unit{text-align:center;color:var(--mut);font-size:13px;letter-spacing:.14em;text-transform:uppercase}
+.state{text-align:center;margin-top:10px;font-size:15px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold2);padding:6px;border-radius:8px}
+.state.stat,.state.idle,.state.pause{color:var(--mut)}.state.bad{color:#ff9a9a}.state.sos{background:var(--red);color:#fff}
+.note{text-align:center;color:var(--mut);font-size:13px;margin-top:6px;min-height:18px}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.g div{background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:10px;text-align:center}
+.v{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}.l{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;margin-top:2px}
+#map{height:280px;border-radius:12px;border:1px solid var(--bd)}
+.leaflet-tile{filter:invert(1) hue-rotate(180deg) brightness(.8) contrast(.9) saturate(.5)}
+button,input{font:inherit;min-height:48px;border-radius:12px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);padding:0 14px;width:100%;margin-top:8px}
+button.gold{background:linear-gradient(180deg,var(--gold2),var(--gold));color:#080909;font-weight:700;border:0}
+button.danger{background:var(--red);border:0;color:#fff;font-weight:700}button:disabled{opacity:.4}
+.r2{display:flex;gap:8px}.r2>*{flex:1}.hide{display:none!important}
+a{color:var(--gold2)}small{color:var(--mut);display:block;margin-top:8px;line-height:1.4}.lbl{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.12em}
+@media (prefers-reduced-motion:no-preference){.state.sos{animation:p 1s infinite}@keyframes p{50%{opacity:.6}}}
+</style></head><body>
+<h1 id="brand" tabindex="0">Maya Live</h1><div class="sub">Yamaha XSR 155 · live tracking</div>
+<div class="pills"><span id="pConn" class="pill">Connecting…</span><span id="pGps" class="pill">GPS –</span><span id="pRide" class="pill">Not riding</span></div>
+
+<div class="card">
+<div class="speed" id="spd">–</div><div class="unit" id="unit">km/h</div>
+<div class="state idle" id="state">Not riding</div><div class="note" id="note"></div>
+<div class="g"><div class="ownerOnly"><div class="v" id="dist">–</div><div class="l">Distance (est.)</div></div><div class="ownerOnly"><div class="v" id="dur">–</div><div class="l">Ride time</div></div>
+<div><div class="v" id="acc">–</div><div class="l">GPS accuracy</div></div><div><div class="v" id="fix">–</div><div class="l">Last fix</div></div></div>
+<div class="g" style="grid-template-columns:1fr"><div><div class="v" id="dest">–</div><div class="l" id="destL">Destination (straight-line)</div></div></div>
+</div>
+
+<div class="card"><div id="map"></div>
+<div class="r2"><button id="follow">Follow: on</button><button id="gm" class="hide" onclick="window.open(this.dataset.u,'_blank','noopener')">Open in Google Maps</button></div></div>
+
+<div class="card hide" id="ctl">
+<div id="login" class="hide"><div class="lbl">Rider sign-in</div><input id="em" type="email" autocomplete="username" placeholder="Email"><input id="pw" type="password" autocomplete="current-password" placeholder="Password"><button class="gold" id="in">Sign in</button></div>
+<div id="rider" class="hide"><div class="lbl">Ride controls</div>
+<button class="gold" id="start">Start ride</button>
+<div class="r2"><button id="pause" disabled>Pause / break</button><button id="end" disabled>End ride</button></div>
+<div class="lbl" style="margin-top:14px">Destination</div>
+<input id="q" placeholder="Search a place, or type lat,lng">
+<div class="r2"><button id="search">Set</button><button id="pick">Pick on map</button><button id="clr">Clear</button></div>
+<input id="rad" type="number" min="30" max="1000" value="100" aria-label="Arrival radius in metres"><small>Arrival radius in metres. Straight-line distance only; no route or ETA.</small>
+<div id="arrBox" class="hide"><div class="state">Arrived</div><button id="arrOk">Dismiss arrival</button></div>
+<button class="danger" id="sos">Hold 2 s for SOS</button><button id="sosOff" class="hide">Cancel SOS</button>
+<button id="share">Share live link</button><button id="out">Sign out</button>
+<small>Keep this page open with the screen on. Browsers and phones may pause GPS in the background or when the screen locks. Don't use it while riding; set it up before you go.</small></div>
+<small id="msg"></small></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+firebase.initializeApp({apiKey:"AIzaSyAllGwfKwd0K5mM2BxmoXn5P9_4ItRvoiM",authDomain:"realtime-database-61cd2.firebaseapp.com",databaseURL:"https://realtime-database-61cd2-default-rtdb.firebaseio.com",projectId:"realtime-database-61cd2",storageBucket:"realtime-database-61cd2.firebasestorage.app",messagingSenderId:"906581522503",appId:"1:906581522503:web:49f52600f58f712e8b9962"});
+const auth=firebase.auth(),db=firebase.database(),liveRef=db.ref("live"),$=id=>document.getElementById(id),now=()=>Date.now();
+const hav=(a,b,c,d)=>{const R=6371000,r=x=>x*Math.PI/180,h=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
+const fd=m=>m<1000?Math.round(m)+" m":(m/1000).toFixed(m<10000?2:1)+" km",ago=s=>s<60?Math.round(s)+"s":s<3600?Math.round(s/60)+"m":Math.round(s/3600)+"h";
+const fT=ms=>{const s=Math.floor(ms/1000);return Math.floor(s/3600)+":"+String(Math.floor(s%3600/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0")};
+const S0=()=>({rideId:null,state:"idle",dist:0,active:0,tick:0,max:0,fix:null,prev:null,anchor:null,route:[],trail:[],ema:null,speed:null,move:"unknown",fast:0,slow:0,rej:0,err:null,gpsNote:null,arr:0,arrived:false,lock:false,sos:false,lastPub:0,lastCk:0,lastSave:0});
+let S=S0(),owner=false,dest=null,wid=null,hb=null,asked=false,follow=true,picking=false,starting=false,conn=false,V=null,recvAt=0,lastLL="",asked2=0;
+const msg=t=>$("msg").textContent=t||"";
+
+/* ---------- map ---------- */
+const map=L.map("map").setView([20.59,78.96],4);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
+let mk=null,line=null,dm=null,first=true;
+map.on("dragstart",()=>{follow=false;$("follow").textContent="Follow: off"});
+map.on("click",e=>{if(picking){picking=false;$("pick").textContent="Pick on map";setDest(e.latlng.lat,e.latlng.lng,"Pinned on map")}});
+$("follow").onclick=()=>{follow=!follow;$("follow").textContent="Follow: "+(follow?"on":"off");lastLL=""};
+
+/* ---------- GPS processing ---------- */
+const MAX_FIX_ACCURACY_M=35;
+const MAX_PLAUSIBLE_SPEED_MPS=55; // Deliberately generous for a 155 cc motorcycle.
+function rejectFix(reason){
+ S.rej++;
+ S.gpsNote=reason;
+ // Never replace the last accepted fix/baseline or publish rejected coordinates.
+ S.speed=null;S.ema=null;S.move="unknown";S.fast=S.slow=0;
+ render();
+}
+function onFix(p){
+ const c=p&&p.coords;
+ if(!c){rejectFix("GPS returned an invalid fix; keeping the last accepted position.");return}
+ const t=Number.isFinite(p.timestamp)&&p.timestamp>0?p.timestamp:now();
+ const lat=c.latitude,lng=c.longitude;
+ const acc=Number.isFinite(c.accuracy)&&c.accuracy>=0?c.accuracy:999;
+ if(!Number.isFinite(lat)||!Number.isFinite(lng)||Math.abs(lat)>90||Math.abs(lng)>180){
+  rejectFix("Invalid GPS coordinates ignored; keeping the last accepted position.");return;
+ }
+ const f={lat,lng,acc,t,sp:(typeof c.speed==="number"&&Number.isFinite(c.speed)&&c.speed>=0&&c.speed<=MAX_PLAUSIBLE_SPEED_MPS)?c.speed*3.6:null};
+ if(acc>MAX_FIX_ACCURACY_M){rejectFix("GPS accuracy is too weak (±"+Math.round(acc)+" m); ignoring this fix.");return}
+ if(S.prev){
+  const dt=(t-S.prev.t)/1000;
+  if(!Number.isFinite(dt)||dt<=0){rejectFix("GPS timestamp was invalid; ignoring this fix.");return}
+  const d=hav(S.prev.lat,S.prev.lng,f.lat,f.lng);
+  const accuracyAllowance=Math.max(25,Math.min(70,f.acc+S.prev.acc));
+  const maxMove=MAX_PLAUSIBLE_SPEED_MPS*dt+accuracyAllowance;
+  if(d>maxMove||(dt<3&&d>120)){
+   rejectFix("GPS jump ignored; waiting for a plausible fix. Last accepted position is unchanged.");return;
+  }
+ }
+ // Only validated fixes become the app's accepted location and distance baseline.
+ S.err=null;S.gpsNote=null;S.rej=0;
+ const previous=S.prev;
+ let sp=f.sp;
+ if(sp==null&&previous){
+  const dt=(t-previous.t)/1000,d=hav(previous.lat,previous.lng,f.lat,f.lng);
+  if(dt>=2&&dt<=15)sp=d>Math.max(10,(f.acc+previous.acc)/2)?d/dt*3.6:0;
+ }
+ S.fix=f;S.prev=f;
+ if(sp==null){S.speed=null;S.ema=null}else{S.speed=S.ema==null?sp:.6*S.ema+.4*sp;S.ema=S.speed}
+ if(S.speed==null){S.move="unknown";S.fast=S.slow=0}
+ else if(S.speed>=4){S.slow=0;if(++S.fast>=2)S.move="moving"}
+ else if(S.speed<=1.5){S.fast=0;if(++S.slow>=3)S.move="stationary"}
+ if(S.state==="riding"){
+  if(!S.anchor)S.anchor=f;
+  else{
+   const d=hav(S.anchor.lat,S.anchor.lng,f.lat,f.lng);
+   if(d>=Math.max(8,f.acc)){
+    S.dist+=d;S.anchor=f;
+    const lr=S.route[S.route.length-1];
+    if(!lr||hav(lr[0],lr[1],f.lat,f.lng)>=25){
+     const pt=[+f.lat.toFixed(5),+f.lng.toFixed(5)];S.route.push(pt);if(S.route.length>2000)S.route.shift();S.trail.push(pt);if(S.trail.length>60)S.trail.shift();
+    }
+   }
+  }
+  if(S.speed!=null&&f.sp!=null&&S.speed>S.max)S.max=S.speed;
+ }
+ if(dest){const d=hav(f.lat,f.lng,dest.lat,dest.lng);
+  if(S.lock&&d>arrR()*2)S.lock=false;
+  if(!S.lock&&!S.arrived){if(d<=arrR()&&f.acc<=50){if(++S.arr>=3)S.arrived=true}else S.arr=0}
+ }
+ pub(false);render();
+}
+function onErr(e){S.err=({1:"Location permission denied",2:"Position unavailable",3:"GPS timed out"})[e.code]||e.message;render()}
+const arrR=()=>Math.max(30,Math.min(1000,+$("rad").value||100));
+
+/* ---------- ride lifecycle ---------- */
+async function lock(){try{if(navigator.wakeLock)await navigator.wakeLock.request("screen")}catch(e){}}
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&wid!=null)lock()});
+function startWatch(){if(wid!=null)return;if(!navigator.geolocation){S.err="Geolocation not supported";return}
+ wid=navigator.geolocation.watchPosition(onFix,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:20000});S.tick=now();hb=setInterval(beat,1000);lock()}
+function beat(){const t=now();if(S.state==="riding")S.active+=t-S.tick;S.tick=t;
+ if(t-S.lastPub>=5000)pub(true);if(t-S.lastSave>=15000){saveLocal();S.lastSave=t}if(t-S.lastCk>=60000){checkpoint();S.lastCk=t}}
+function saveLocal(){try{if(S.rideId)localStorage.setItem("maya_active",JSON.stringify({rideId:S.rideId,dist:S.dist,active:S.active,max:S.max,route:S.route}))}catch(e){}}
+function summary(){const r={distanceM:Math.round(S.dist),durationS:Math.round(S.active/1000),maxKmh:Math.round(S.max)};if(S.dist>200&&S.active>60000)r.avgKmh=Math.round(S.dist/(S.active/1000)*3.6);return r}
+function checkpoint(){if(!S.rideId)return;db.ref("owner/rides/"+S.rideId).update(summary()).catch(()=>{});db.ref("owner/routes/"+S.rideId).set(S.route.slice(-2000)).catch(()=>{})}
+$("start").onclick=async()=>{
+ if(starting||S.state!=="idle")return;
+ if(localStorage.getItem("maya_active")){msg("An unfinished ride exists. Resume or end it first.");return}
+ starting=true;$("start").disabled=true;msg("");
+ try{const r=db.ref("owner/rides").push();await r.set({startT:firebase.database.ServerValue.TIMESTAMP,status:"active"});
+  S=Object.assign(S0(),{rideId:r.key,state:"riding"});S.lastCk=now();startWatch();saveLocal();pub(true)}
+ catch(e){msg("Could not start: "+(e.code||e.message)+" (are you signed in as the owner, and are the rules published?)");$("start").disabled=false}
+ starting=false;render()};
+$("pause").onclick=()=>{if(S.state==="riding"){S.state="paused";$("pause").textContent="Resume"}else if(S.state==="paused"){S.state="riding";S.anchor=null;S.tick=now();$("pause").textContent="Pause / break";startWatch()}saveLocal();checkpoint();pub(true);render()};
+$("end").onclick=async()=>{
+ if(S.state==="idle"||!confirm("End this ride?"))return;
+ if(wid!=null){navigator.geolocation.clearWatch(wid);wid=null}clearInterval(hb);hb=null;
+ const id=S.rideId,sum=summary(),f=S.fix;
+ try{await db.ref("owner/rides/"+id).update(Object.assign(sum,{status:"ended",endT:firebase.database.ServerValue.TIMESTAMP}));await db.ref("owner/routes/"+id).set(S.route.slice(-2000));
+  localStorage.removeItem("maya_active");await liveRef.set({state:"idle",t:now()});msg("Ride saved: "+fd(sum.distanceM)+" (GPS estimate).")}
+ catch(e){msg("Ride not fully saved ("+(e.code||e.message)+"). It is kept on this phone; tap Resume to try again.");S.state="paused";$("pause").textContent="Resume";render();return}
+ S=S0();$("pause").textContent="Pause / break";render()};
+function restore(){let a;try{a=JSON.parse(localStorage.getItem("maya_active")||"null")}catch(e){}
+ if(a&&S.state==="idle"){S=Object.assign(S0(),{rideId:a.rideId,dist:a.dist||0,active:a.active||0,max:a.max||0,route:a.route||[],state:"paused"});S.trail=S.route.slice(-60);$("pause").textContent="Resume";msg("Unfinished ride restored. Tap Resume or End ride.")}}
+
+/* ---------- destination ---------- */
+function setDest(lat,lng,name){dest={lat,lng,name};S.arr=0;S.arrived=false;S.lock=false;if(dm)map.removeLayer(dm);dm=L.circleMarker([lat,lng],{radius:8,color:"#E4C56A",fillColor:"#080909",fillOpacity:1,weight:3}).addTo(map);render()}
+$("search").onclick=async()=>{const q=$("q").value.trim(),m=q.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);if(!q)return;
+ if(m){const a=+m[1],b=+m[2];if(Math.abs(a)<=90&&Math.abs(b)<=180){setDest(a,b,"Coordinates");map.setView([a,b],14);follow=false;return}}
+ try{const r=await (await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q))).json();
+  if(r[0]){setDest(+r[0].lat,+r[0].lon,r[0].display_name.split(",")[0]);map.setView([+r[0].lat,+r[0].lon],14);follow=false;msg("")}else msg("No place found. Try lat,lng.")}catch(e){msg("Search unavailable. Use lat,lng or Pick on map.")}};
+$("pick").onclick=()=>{picking=!picking;$("pick").textContent=picking?"Tap the map…":"Pick on map"};
+$("clr").onclick=()=>{dest=null;if(dm){map.removeLayer(dm);dm=null}S.arr=0;S.arrived=false;render()};
+$("arrOk").onclick=()=>{S.arrived=false;S.arr=0;S.lock=true;pub(true);render()};
+
+/* ---------- SOS, share ---------- */
+let hold;const sb=$("sos");
+["touchstart","mousedown"].forEach(e=>sb.addEventListener(e,()=>{hold=setTimeout(()=>{if(S.state==="idle"){msg("Start a ride first so SOS has a location to share.");return}S.sos=true;pub(true);render()},2000)}));
+["touchend","touchcancel","mouseup","mouseleave"].forEach(e=>sb.addEventListener(e,()=>clearTimeout(hold)));
+$("sosOff").onclick=()=>{S.sos=false;pub(true);render()};
+$("share").onclick=()=>{const u=location.origin+location.pathname,t="Follow my ride live:";if(navigator.share)navigator.share({title:"Maya Live",text:t,url:u}).catch(()=>{});else window.open("https://wa.me/?text="+encodeURIComponent(t+" "+u))};
+
+/* ---------- publishing (public data only) ---------- */
+function ownerModel(){const f=S.fix;return{state:S.state,sos:S.sos,arrived:S.arrived,move:S.err?"unavailable":S.move,speed:S.speed,lat:f?f.lat:null,lng:f?f.lng:null,acc:f?Math.round(f.acc):null,fixT:f?f.t:null,toDest:(dest&&f)?hav(f.lat,f.lng,dest.lat,dest.lng):null,trail:S.trail}}
+function pub(force){if(!owner||S.state==="idle")return;const n=now();if(!force&&n-S.lastPub<3000)return;S.lastPub=n;const m=ownerModel(),d={state:m.state,t:n,move:m.move,sos:!!m.sos,arrived:!!m.arrived};
+ if(m.lat!=null){d.lat=m.lat;d.lng=m.lng;d.acc=m.acc;d.fixT=m.fixT}if(m.speed!=null)d.speed=Math.round(m.speed);if(m.toDest!=null)d.toDest=Math.round(m.toDest);if(m.trail.length)d.trail=m.trail;
+ liveRef.set(d).catch(e=>msg("Live update rejected ("+e.code+"). Is this the owner account and are the rules published?"))}
+liveRef.on("value",s=>{V=s.val();recvAt=now();render()});
+db.ref(".info/connected").on("value",s=>{conn=!!s.val();render()});
+
+/* ---------- display ---------- */
+function render(){
+ let m,own=false,fa=null,la=0;
+ if(owner&&S.state!=="idle"){m=ownerModel();own=true;fa=m.fixT?(now()-m.fixT)/1000:null}
+ else if(V){m=V;if(V.fixT)fa=(V.t-V.fixT)/1000+(now()-recvAt)/1000;la=(now()-recvAt)/1000}
+ else m={state:"idle"};
+ const active=m.state&&m.state!=="idle",stale=fa!=null&&fa>30;
+ let key="idle",label="Not riding";
+ if(active){if(m.sos){key="sos";label="SOS – emergency"}else if(m.state==="paused"){key="pause";label="On a break"}
+  else if(own&&S.err||m.move==="unavailable"){key="bad";label="GPS unavailable"}else if(m.lat==null||m.fixT==null){key="bad";label="Waiting for GPS"}
+  else if(stale){key="bad";label="Location stale"}else if(m.arrived){key="arr";label="Arrived"}
+  else if(m.move==="moving"){key="mov";label="Moving"}else if(m.move==="stationary"){key="stat";label="Stationary"}else{key="stat";label="Speed unknown"}}
+ $("state").className="state "+key;$("state").textContent=label;
+ const showSp=active&&m.state==="riding"&&!stale&&m.speed!=null;
+ $("spd").textContent=showSp?Math.round(m.speed):"–";$("unit").textContent=(active&&m.state==="riding"&&!showSp&&!stale)?"speed unavailable":"km/h";
+ let note="";
+ if(own&&S.err)note=S.err+". Check location permission and signal.";
+ else if(own&&S.gpsNote)note=S.gpsNote;
+ else if(active&&stale)note="Showing last known position ("+ago(fa)+" old).";
+ else if(active&&!own&&la>30)note="No updates from the rider for "+ago(la)+". Their phone may be offline or the page closed.";
+ else if(active&&m.toDest!=null&&m.toDest<1000&&!m.arrived)note="Approaching destination.";
+ $("note").textContent=note;
+ document.querySelectorAll(".ownerOnly").forEach(e=>e.classList.toggle("hide",!own));
+ if(own){$("dist").textContent=fd(S.dist);$("dur").textContent=fT(S.active)}
+ $("acc").textContent=(active&&m.acc!=null)?"±"+m.acc+" m"+(m.acc>50?" weak":""):"–";$("fix").textContent=(active&&fa!=null)?ago(fa)+" ago":"–";
+ $("dest").textContent=(own&&dest)?(m.toDest!=null?fd(m.toDest):"Waiting for GPS"):(active&&m.toDest!=null?fd(m.toDest):"–");
+ $("pConn").textContent=conn?"Connected":"Offline";$("pConn").className="pill "+(conn?"on":"bad");
+ const g=$("pGps");if(!active){g.textContent="GPS –";g.className="pill"}else if(own&&S.err){g.textContent="GPS error";g.className="pill bad"}else if(m.acc!=null){g.textContent=m.acc>50?"GPS weak":"GPS ±"+m.acc+" m";g.className="pill "+(m.acc>50||stale?"bad":"on")}else{g.textContent="GPS waiting";g.className="pill"}
+ $("pRide").textContent=active?(m.state==="paused"?"On a break":"Riding"):"Not riding";$("pRide").className="pill "+(active?"on":"");
+ /* map */
+ if(active&&m.lat!=null){const ll=[m.lat,m.lng],k=ll.join(),col=stale?"#777":"#E4C56A",tr=own?S.trail:(m.trail||[]);
+  if(!mk){mk=L.circleMarker(ll,{radius:9,weight:3,color:"#080909",fillOpacity:1}).addTo(map);line=L.polyline([],{color:"#C9A44C",weight:4,opacity:.8}).addTo(map)}
+  mk.setLatLng(ll);mk.setStyle({fillColor:col});line.setLatLngs(tr);
+  if(first){map.setView(ll,15);first=false;lastLL=k}else if(follow&&k!==lastLL){map.panTo(ll,{animate:true,duration:.6});lastLL=k}
+  $("gm").classList.remove("hide");$("gm").dataset.u="https://www.google.com/maps?q="+m.lat+","+m.lng}
+ else if(mk){map.removeLayer(mk);map.removeLayer(line);mk=line=null;first=true;$("gm").classList.add("hide")}
+ /* rider buttons */
+ $("start").disabled=starting||S.state!=="idle";$("pause").disabled=S.state==="idle";$("end").disabled=S.state==="idle";
+ $("arrBox").classList.toggle("hide",!S.arrived);$("sos").classList.toggle("hide",S.sos);$("sosOff").classList.toggle("hide",!S.sos)}
+setInterval(render,1000);
+
+/* ---------- rider sign-in (hidden entry; security is enforced by Firebase rules) ---------- */
+function openLogin(){asked=true;$("ctl").classList.remove("hide");$("login").classList.remove("hide");$("em").focus()}
+let ht,taps=[];const br=$("brand");
+["touchstart","mousedown"].forEach(e=>br.addEventListener(e,()=>{ht=setTimeout(openLogin,2000)}));
+["touchend","touchcancel","mouseup","mouseleave"].forEach(e=>br.addEventListener(e,()=>clearTimeout(ht)));
+br.addEventListener("contextmenu",e=>e.preventDefault());
+br.addEventListener("click",()=>{const t=now();taps=taps.filter(x=>t-x<3000);taps.push(t);if(taps.length>=5){taps=[];openLogin()}});
+br.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.shiftKey)openLogin()});
+$("in").onclick=()=>{msg("");auth.signInWithEmailAndPassword($("em").value.trim(),$("pw").value).catch(e=>msg("Sign-in failed: "+e.code))};
+$("out").onclick=()=>{if(S.state!=="idle"&&!confirm("A ride is active. Sign out anyway? Tracking will stop publishing."))return;asked=false;auth.signOut()};
+auth.onAuthStateChanged(u=>{owner=!!u;$("ctl").classList.toggle("hide",!u&&!asked);$("rider").classList.toggle("hide",!u);$("login").classList.toggle("hide",!!u||!asked);if(u)restore();render()});
+</script></body></html>
